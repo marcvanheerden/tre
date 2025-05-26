@@ -30,6 +30,8 @@ fn sort_key(dirent: &DirEntry) -> (String, bool, String) {
 
 fn get_files(path: String, max_depth: usize) -> Vec<DirEntry> {
     // Get the relevant files and sort them in the correct order
+    // This sort order is load-bearing to tre()
+    // Changing this will likely break it 
 
     let mut files = WalkBuilder::new(path.clone())
         .hidden(false)
@@ -44,6 +46,24 @@ fn get_files(path: String, max_depth: usize) -> Vec<DirEntry> {
     files
 }
 
+fn root_name(file: &DirEntry) -> String {
+    // if path is "." then resolve its name
+    // else just use the path
+    if file.path() == Path::new(".") {
+        let resolved_name = canonicalize(file.file_name()).expect("can't canonicalize '.'");
+        format!(
+            "{}",
+            resolved_name
+                .file_name()
+                .expect("can't get filename of '.'")
+                .to_string_lossy()
+                .blue()
+        )
+    } else {
+        format!("{}", file.path().to_string_lossy().blue())
+    }
+}
+
 // Spacers
 const EMPTY: &str = " \u{a0}\u{a0} ";
 const ELBOW: &str = "└── ";
@@ -52,6 +72,8 @@ const OVERA: &str = "│\u{a0}\u{a0} ";
 
 pub fn tre(path: String, max_depth: usize) -> String {
     // Build the tree to be printed out
+    // This implementation is not at all generalised, relies on the specific sorting 
+    // order of the files 
 
     let files = get_files(path.clone(), max_depth);
 
@@ -65,9 +87,14 @@ pub fn tre(path: String, max_depth: usize) -> String {
     let mut parents: Vec<&Path> = Vec::new();
 
     for file in files.iter().rev() {
-        let mut last = false;
+        //working backwards makes it easy to identify the last child of each
+        //parent directory which is needed to choose between elbows or t-joints
 
-        if file.path().is_dir() {
+        let mut last_child = false;
+        let isdir = file.path().is_dir();
+        let name = file.file_name().to_string_lossy();
+
+        if isdir {
             parents.retain(|&p| p != file.path());
         }
 
@@ -87,33 +114,22 @@ pub fn tre(path: String, max_depth: usize) -> String {
             }
         }
 
-        if !parents.contains(&file.path().parent().expect("can't find parent dir")) {
-            parents.push(file.path().parent().expect("can't find parent dir"));
-            last = true;
+        let parent = file.path().parent().expect("can't find parent dir");
+        if !parents.contains(&parent) {
+            parents.push(parent);
+            last_child = true;
         }
 
         if file.path() == Path::new(&path) {
-            if file.path() == Path::new(".") {
-                let resolved_name = canonicalize(file.file_name()).expect("can't canonicalize '.'");
-                line.push_str(&format!(
-                    "{}",
-                    resolved_name
-                        .file_name()
-                        .expect("can't get filename of '.'")
-                        .to_string_lossy()
-                        .blue()
-                ));
-            } else {
-                line.push_str(&format!("{}", file.path().to_string_lossy().blue()));
-            }
+            line.push_str(&root_name(file));
         } else {
-            if last {
+            if last_child {
                 line.push_str(ELBOW);
             } else {
                 line.push_str(TJOIN);
             }
-            let name = file.file_name().to_string_lossy();
-            if file.path().is_dir() {
+
+            if isdir {
                 line.push_str(&format!("{}", name.blue()));
             } else {
                 line.push_str(&name);
